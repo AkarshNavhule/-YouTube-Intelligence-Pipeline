@@ -47,13 +47,16 @@ def validate_env():
     if not os.getenv("RECIPIENT_EMAIL") or os.getenv("RECIPIENT_EMAIL") == "your@email.com":
         errors.append("RECIPIENT_EMAIL not set in .env")
 
-    if not (PROJECT_ROOT / "credentials.json").exists():
+    has_local_creds = (PROJECT_ROOT / "credentials.json").exists()
+    has_env_creds = bool(os.getenv("GOOGLE_CREDENTIALS_JSON") and os.getenv("GOOGLE_TOKEN_JSON"))
+    if not has_local_creds and not has_env_creds:
         errors.append(
             "credentials.json not found in project root.\n"
             "  -> Go to console.cloud.google.com\n"
             "  -> Enable: YouTube Data API v3, Sheets, Slides, Gmail APIs\n"
             "  -> Create OAuth 2.0 Client ID (Desktop app)\n"
-            "  -> Download as credentials.json"
+            "  -> Download as credentials.json\n"
+            "  -> On a server: set GOOGLE_CREDENTIALS_JSON and GOOGLE_TOKEN_JSON env vars (base64-encoded)"
         )
 
     if errors:
