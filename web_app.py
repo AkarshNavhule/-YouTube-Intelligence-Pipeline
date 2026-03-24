@@ -168,17 +168,39 @@ def api_status():
 @app.route("/api/google-status")
 def api_google_status():
     """Return whether Google credentials are present and valid."""
+    import base64, tempfile
     token_file = BASE_DIR / "token.json"
     creds_file = BASE_DIR / "credentials.json"
 
+    if not _GOOGLE_LIBS:
+        return jsonify({"status": "unknown", "message": "google-auth not installed"})
+
+    # Server/cloud environment: credentials injected via env vars
+    creds_b64 = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+    token_b64 = os.environ.get("GOOGLE_TOKEN_JSON")
+    if creds_b64 and token_b64:
+        try:
+            tmp_dir = Path(tempfile.mkdtemp())
+            tmp_token = tmp_dir / "token.json"
+            tmp_token.write_bytes(base64.b64decode(token_b64))
+            creds = Credentials.from_authorized_user_file(str(tmp_token), GOOGLE_SCOPES)
+            if creds.valid:
+                return jsonify({"status": "ok", "message": "Google authenticated (env vars)"})
+            if creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+                return jsonify({"status": "ok", "message": "Google authenticated (refreshed)"})
+            return jsonify({"status": "expired",
+                            "message": "Token expired — update GOOGLE_TOKEN_JSON env var"})
+        except Exception as exc:
+            return jsonify({"status": "error", "message": str(exc)})
+
+    # Local environment: use project-root files
     if not creds_file.exists():
         return jsonify({"status": "no_credentials",
                         "message": "credentials.json not found"})
     if not token_file.exists():
         return jsonify({"status": "not_authenticated",
                         "message": "Not authenticated — click Connect Google"})
-    if not _GOOGLE_LIBS:
-        return jsonify({"status": "unknown", "message": "google-auth not installed"})
 
     try:
         creds = Credentials.from_authorized_user_file(str(token_file), GOOGLE_SCOPES)
@@ -203,8 +225,18 @@ def api_google_auth():
     creds_file = BASE_DIR / "credentials.json"
     token_file = BASE_DIR / "token.json"
 
-    if not creds_file.exists():
-        return jsonify({"error": "credentials.json not found in project root"}), 400
+    # Server/cloud environment: browser-based OAuth cannot run on a headless server.
+    # Credentials must be provided via GOOGLE_CREDENTIALS_JSON / GOOGLE_TOKEN_JSON env vars.
+    if os.environ.get("GOOGLE_CREDENTIALS_JSON") or not creds_file.exists():
+        return jsonify({
+            "error": (
+                "Running on a server — browser OAuth is not available. "
+                "To re-authenticate: (1) run the auth flow locally, "
+                "(2) run encode_credentials.py, "
+                "(3) update the GOOGLE_TOKEN_JSON environment variable in your deployment dashboard, "
+                "(4) redeploy."
+            )
+        }), 400
 
     # Remove stale token so flow starts fresh
     if token_file.exists():
